@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "googlevoice": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-googlevoice"],
+      "env": {
+        "GOOGLEVOICE_STATE_DIR": "/home/youruser/.local/share/mcp-googlevoice",
+        "GOOGLEVOICE_DEBUG_PORT": "9222"
+      }
+    }
+  }
+}

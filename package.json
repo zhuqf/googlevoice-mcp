@@ -1,0 +1,31 @@
+{
+  "name": "mcp-googlevoice",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/server.js",
+  "bin": {
+    "mcp-googlevoice": "./dist/server.js"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/server.js",
+    "dev": "npx tsx server.ts",
+    "prepublishOnly": "npm run build",
+    "postinstall": "npx playwright install chromium 2>/dev/null || true",
+    "pack:bundle": "tar -czf googlevoice-openclaw-bundle.tgz .claude-plugin skills .mcp.json README.md"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  }
+}

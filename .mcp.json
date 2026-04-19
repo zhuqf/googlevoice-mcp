@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "googlevoice": {
+      "command": "npx",
+      "args": ["-y", "mcp-googlevoice"]
+    }
+  }
+}

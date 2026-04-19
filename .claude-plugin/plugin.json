@@ -1,0 +1,11 @@
+{
+  "name": "googlevoice",
+  "displayName": "Google Voice SMS",
+  "description": "Google Voice SMS tools — list, read, send, reply, and manage SMS messages via browser automation. Requires system Chromium and Xvfb on headless servers.",
+  "version": "0.0.1",
+  "author": "Michael",
+  "license": "Apache-2.0",
+  "keywords": ["googlevoice", "sms", "messaging", "mcp"],
+  "skills": ["skills/"],
+  "mcpConfig": ".mcp.json"
+}
