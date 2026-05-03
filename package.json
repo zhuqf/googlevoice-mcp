@@ -17,7 +17,7 @@
     "dev": "npx tsx server.ts",
     "prepublishOnly": "npm run build",
     "postinstall": "npx playwright install chromium 2>/dev/null || true",
-    "pack:bundle": "tar -czf googlevoice-openclaw-bundle.tgz .claude-plugin skills .mcp.json README.md"
+    "pack:openclaw": "tar -czf googlevoice-openclaw-plugin.tgz openclaw.plugin.json skills .mcp.json README.md package.json package-lock.json server.ts browser.ts actions.ts selectors.ts types.ts tsconfig.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

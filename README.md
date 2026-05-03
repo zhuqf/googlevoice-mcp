@@ -175,55 +175,73 @@ All browser operations use a single system Chromium process (not Playwright's bu
 - **Persistence**: Chrome runs as a detached background process and survives MCP restarts. Playwright disconnects on shutdown but reconnects on next operation.
 - **Idle cleanup**: Playwright connection auto-disconnects after 5 min idle (Chrome keeps running).
 
-## OpenClaw Plugin Bundle
+## OpenClaw Plugin
 
-This repo also ships as an OpenClaw plugin bundle (Claude bundle format). The bundle provides the `/googlevoice:configure` skill and wires the MCP tools into OpenClaw's embedded Pi agent.
+This repo also ships as an OpenClaw-native plugin plus an MCP server config. The native plugin keeps a stable plugin id (`googlevoice`) while showing the friendly name `Google Voice SMS`.
 
-### Install the bundle
+### Install for OpenClaw
 
 ```bash
 # From local directory (development)
-openclaw plugins install ./googlevoice-plugin
+openclaw plugins install /path/to/googlevoice-mcp --dangerously-force-unsafe-install
 
-# From archive
-npm run pack:bundle            # creates googlevoice-openclaw-bundle.tgz
-openclaw plugins install ./googlevoice-openclaw-bundle.tgz
+# Or track live source edits
+openclaw plugins install /path/to/googlevoice-mcp --link --dangerously-force-unsafe-install
+
+# Register the Google Voice MCP server for tool access
+openclaw mcp set googlevoice '{"command":"npx","args":["-y","mcp-googlevoice"]}'
+
+# Reload OpenClaw
+openclaw gateway restart
 ```
 
-### What the bundle provides
+The unsafe-install flag is required because the server launches system Chromium/Xvfb for Google Voice browser automation.
+
+### Install from archive
+
+```bash
+npm run pack:openclaw            # creates googlevoice-openclaw-plugin.tgz
+openclaw plugins install ./googlevoice-openclaw-plugin.tgz --dangerously-force-unsafe-install
+openclaw mcp set googlevoice '{"command":"npx","args":["-y","mcp-googlevoice"]}'
+openclaw gateway restart
+```
+
+### What the plugin provides
 
 | Feature | Detail |
 |---------|--------|
-| Skill: `/googlevoice:configure` | Interactive login, status check, and logout |
-| MCP tools | `gv_login`, `gv_check_login`, `gv_list_sms`, `gv_read_sms`, `gv_send_sms`, `gv_reply_sms`, `gv_mark_read` — registered as `googlevoice__<tool>` |
-| MCP transport | stdio via `npx mcp-googlevoice` (no local source needed) |
+| Plugin id | `googlevoice` |
+| Plugin name | `Google Voice SMS` |
+| Skill: `googlevoice` | Interactive login guidance, status check, and SMS usage workflow |
+| MCP tools | `gv_login`, `gv_check_login`, `gv_list_sms`, `gv_read_sms`, `gv_send_sms`, `gv_reply_sms`, `gv_mark_read` — registered as `googlevoice__<tool>` after `openclaw mcp set` |
+| MCP transport | stdio via `npx mcp-googlevoice` |
 
-### Bundle layout
+### OpenClaw layout
 
 ```
-.claude-plugin/plugin.json   ← bundle marker + metadata
-skills/configure/SKILL.md    ← /googlevoice:configure skill
-.mcp.json                    ← MCP server config (npx mcp-googlevoice)
+openclaw.plugin.json        ← OpenClaw-native plugin manifest (id: googlevoice, name: Google Voice SMS)
+skills/googlevoice/SKILL.md ← Google Voice setup and usage skill
+.mcp.json                   ← compatibility MCP server config (npx mcp-googlevoice)
 ```
 
-### After install
+### Verify install
 
 ```bash
-openclaw plugins list                    # verify bundle detected
-openclaw plugins inspect googlevoice     # check mapped capabilities
-openclaw gateway restart                 # activate in next session
+openclaw plugins list                    # should show id googlevoice, name Google Voice SMS
+openclaw plugins inspect googlevoice     # check plugin metadata and skill
+openclaw mcp show googlevoice            # check MCP server config
 ```
 
-Then call `/googlevoice:configure login` to complete the browser login flow.
+Then ask OpenClaw to configure Google Voice or call the `gv_login`/`gv_check_login` MCP tools through the `googlevoice` skill flow.
 
 ## Development
 
 ```bash
 git clone <repo>
-cd googlevoice-plugin
+cd googlevoice-mcp
 npm install
 npm run dev          # run directly with tsx (no build needed)
 npm run build        # compile TypeScript → dist/
 node dist/server.js  # run compiled output
-npm run pack:bundle  # create googlevoice-openclaw-bundle.tgz
+npm run pack:openclaw # create googlevoice-openclaw-plugin.tgz
 ```
