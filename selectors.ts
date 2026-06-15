@@ -1,5 +1,5 @@
 // Google Voice DOM selectors — isolated for easy maintenance when Google changes the UI.
-// Verified against live DOM as of 2026-04-13.
+// Verified against live DOM as of 2026-06-15.
 
 export const SELECTORS = {
   // Login state detection
@@ -14,7 +14,8 @@ export const SELECTORS = {
   CONVERSATION_READ_CLASS: 'read',
 
   // Individual conversation view
-  MESSAGE_BUBBLE: 'gv-text-message-item',
+  // 2026-06-15: Google renamed the bubble element gv-text-message-item -> gv-message-item
+  MESSAGE_BUBBLE: 'gv-message-item',
   MESSAGE_TEXT: '.subject-content-container.bubble',
   MESSAGE_TIMESTAMP: '.sender-timestamp .timestamp',
   MESSAGE_INCOMING: '.incoming',
