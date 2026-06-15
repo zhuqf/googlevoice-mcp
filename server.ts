@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { ensureBrowser, launchLoginBrowser, closeBrowser, checkLoginStatus, REMOTE_DEBUG_PORT } from './browser.js'
+import { ensureBrowser, launchLoginBrowser, closeBrowser, checkLoginStatus, isHeadlessServer, REMOTE_DEBUG_PORT } from './browser.js'
 import { listSms, readConversation, sendSms, replySms, markAsRead } from './actions.js'
 
 const server = new Server(
@@ -155,16 +155,25 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
         // Launch system Chrome (not Playwright) to avoid Google's automation detection
         const chromePath = await launchLoginBrowser()
 
+        if (isHeadlessServer()) {
+          return textResult(
+            `System Chrome (${chromePath}) launched with remote debugging on port ${REMOTE_DEBUG_PORT}.\n\n` +
+            'This looks like a headless Linux server. To complete login from your local machine:\n' +
+            `1. Set up an SSH tunnel:  ssh -L ${REMOTE_DEBUG_PORT}:localhost:${REMOTE_DEBUG_PORT} <your-server>\n` +
+            `2. Open Chrome and go to:  chrome://inspect/#devices\n` +
+            `3. Click "Configure..." and add localhost:${REMOTE_DEBUG_PORT}\n` +
+            '4. Click "inspect" on the Google Voice target\n' +
+            '5. Complete Google login (including 2FA if prompted)\n' +
+            '6. Once you see Google Voice Messages, call gv_check_login to verify.',
+          )
+        }
+
         return textResult(
-          `System Chrome (${chromePath}) launched with remote debugging on port ${REMOTE_DEBUG_PORT}.\n\n` +
-          'To complete login interactively from your local machine:\n' +
-          `1. Set up an SSH tunnel:  ssh -L ${REMOTE_DEBUG_PORT}:localhost:${REMOTE_DEBUG_PORT} <your-server>\n` +
-          `2. Open Chrome and go to:  chrome://inspect/#devices\n` +
-          `3. Click "Configure..." and add localhost:${REMOTE_DEBUG_PORT}\n` +
-          '4. Click "inspect" on the Google Voice target\n' +
-          '5. Complete Google login (including 2FA if prompted)\n' +
-          '6. Once you see Google Voice Messages, call gv_check_login to verify.\n\n' +
-          'Alternatively, set GOOGLEVOICE_DEBUG_PORT to use a different port.',
+          `System Chrome (${chromePath}) launched and opened Google Voice.\n\n` +
+          'A Chrome window should now be open on this machine. Complete your Google login ' +
+          '(including 2FA if prompted) directly in that window.\n' +
+          'Once you can see your Google Voice Messages, call gv_check_login to verify.\n\n' +
+          'Leave that Chrome window open — closing it logs you out.',
         )
       }
 

@@ -1,9 +1,14 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, platform } from 'node:os'
 import { execSync, spawn, type ChildProcess } from 'node:child_process'
 import { SELECTORS } from './selectors.js'
+
+// --- Platform detection (cross-platform: Windows / macOS / Linux) ---
+const IS_WINDOWS = platform() === 'win32'
+const IS_MAC = platform() === 'darwin'
+const IS_LINUX = platform() === 'linux'
 
 const STATE_DIR = process.env.GOOGLEVOICE_STATE_DIR
   ?? join(homedir(), '.local', 'share', 'openclaw', 'googlevoice')
@@ -16,6 +21,40 @@ export const REMOTE_DEBUG_PORT = Number(process.env.GOOGLEVOICE_DEBUG_PORT) || 9
 
 // Find system Chrome/Chromium (avoids Google's Playwright automation detection)
 function findSystemChrome(): string {
+  // Explicit override always wins
+  const override = process.env.GOOGLEVOICE_CHROME_PATH
+  if (override && existsSync(override)) return override
+
+  if (IS_WINDOWS) {
+    const pf = process.env['PROGRAMFILES'] ?? 'C:\\Program Files'
+    const pfx86 = process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)'
+    const localApp = process.env['LOCALAPPDATA'] ?? ''
+    const candidates = [
+      join(pf, 'Google\\Chrome\\Application\\chrome.exe'),
+      join(pfx86, 'Google\\Chrome\\Application\\chrome.exe'),
+      localApp ? join(localApp, 'Google\\Chrome\\Application\\chrome.exe') : '',
+      // Chromium-based Edge is a usable fallback
+      join(pfx86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      join(pf, 'Microsoft\\Edge\\Application\\msedge.exe'),
+    ]
+    for (const p of candidates) {
+      if (p && existsSync(p)) return p
+    }
+    throw new Error('No system Chrome/Edge found. Install Google Chrome, or set GOOGLEVOICE_CHROME_PATH to chrome.exe.')
+  }
+
+  if (IS_MAC) {
+    const candidates = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ]
+    for (const p of candidates) {
+      if (existsSync(p)) return p
+    }
+    throw new Error('No system Chrome/Chromium found. Install Google Chrome, or set GOOGLEVOICE_CHROME_PATH.')
+  }
+
+  // Linux
   for (const name of ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium']) {
     try {
       return execSync(`which ${name}`, { encoding: 'utf-8' }).trim()
@@ -24,7 +63,7 @@ function findSystemChrome(): string {
   throw new Error('No system Chrome/Chromium found. Install chromium or google-chrome.')
 }
 
-/** Remove stale lock files left by crashed Chrome processes */
+/** Remove stale lock files left by crashed Chrome processes (no-op on platforms that don't use them) */
 function cleanStaleLocks(): void {
   for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
     const lockPath = join(PROFILE_DIR, name)
@@ -50,26 +89,36 @@ function resetIdleTimer(): void {
   }, IDLE_TIMEOUT_MS)
 }
 
-/** Check if system Chrome is already running with our debug port */
-function isChromeRunning(): boolean {
+/** Check if system Chrome is already running with our debug port (portable: uses fetch, not curl) */
+async function isChromeRunning(): Promise<boolean> {
   try {
-    execSync(`curl -s http://localhost:${REMOTE_DEBUG_PORT}/json/version`, { stdio: 'ignore' })
-    return true
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 1000)
+    const res = await fetch(`http://localhost:${REMOTE_DEBUG_PORT}/json/version`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    return res.ok
   } catch {
     return false
   }
 }
 
-/** Launch system Chrome with Xvfb and remote debugging */
+/** Launch system Chrome with remote debugging (and Xvfb only on headless Linux) */
 async function launchChrome(url?: string): Promise<void> {
-  if (isChromeRunning()) return
+  if (await isChromeRunning()) return
 
   mkdirSync(PROFILE_DIR, { recursive: true })
   cleanStaleLocks()
 
   const chromePath = findSystemChrome()
 
-  await startXvfb()
+  // Xvfb is only needed on a headless Linux server (no DISPLAY). On Windows,
+  // macOS, and Linux desktops, Chrome opens a normal visible window the user
+  // can log into directly.
+  if (IS_LINUX && !process.env.DISPLAY) {
+    await startXvfb()
+  }
 
   const args = [
     `--user-data-dir=${PROFILE_DIR}`,
@@ -95,7 +144,7 @@ async function launchChrome(url?: string): Promise<void> {
   // Wait for debug port to be ready
   for (let i = 0; i < 20; i++) {
     await new Promise(resolve => setTimeout(resolve, 500))
-    if (isChromeRunning()) return
+    if (await isChromeRunning()) return
   }
 
   throw new Error('System Chrome failed to start within 10 seconds')
@@ -136,12 +185,18 @@ async function connectPlaywright(): Promise<Page> {
 
 /**
  * Launch system Chrome for interactive login.
- * User connects via SSH tunnel + chrome://inspect to complete Google login.
+ * On a desktop (Windows/macOS/Linux GUI) a visible window opens — log in there.
+ * On a headless Linux server, connect via SSH tunnel + chrome://inspect.
  */
 export async function launchLoginBrowser(): Promise<string> {
   await shutdownBrowser()
   await launchChrome(VOICE_MESSAGES_URL)
   return findSystemChrome()
+}
+
+/** True when running on a headless Linux server (login needs the SSH-tunnel flow) */
+export function isHeadlessServer(): boolean {
+  return IS_LINUX && !process.env.DISPLAY
 }
 
 /**
@@ -168,7 +223,7 @@ export async function ensureBrowser(): Promise<Page> {
   return ensureLock
 }
 
-// --- Xvfb management ---
+// --- Xvfb management (headless Linux only) ---
 
 async function startXvfb(): Promise<void> {
   if (xvfbProcess) return
