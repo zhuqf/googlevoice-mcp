@@ -1,247 +1,103 @@
 import type { Page } from 'playwright'
 import { SELECTORS } from './selectors.js'
-import { navigateToMessages, navigateToConversation, VOICE_MESSAGES_URL } from './browser.js'
-import type { SmsConversation, SmsMessage } from './types.js'
+import { assertOwnedVoicePage, navigateToMessages } from './browser.js'
+import {
+  hasExactRecipientEvidence,
+  isE164PhoneNumber,
+  isExactOutgoingMessage,
+  isNewOutgoingMessageCount,
+  verifiedConversationId,
+} from './safety.js'
 
-export async function listSms(
-  page: Page,
-  options: { filter: 'all' | 'unread'; limit: number },
-): Promise<SmsConversation[]> {
-  await navigateToMessages(page)
-
-  await page.waitForSelector(SELECTORS.CONVERSATION_ITEM, { timeout: 10000 })
-
-  // First pass: extract visible data and conversation IDs from all items.
-  // Uses history.pushState interception to capture the conversation URL
-  // without actually navigating — this avoids marking unread conversations as read.
-  const rawItems = await page.$$eval(SELECTORS.CONVERSATION_ITEM, (els, sel) => {
-    return els.map(el => {
-      const container = el.querySelector(sel.clickable)
-      const isUnread = !container?.classList.contains(sel.readClass)
-      const contact = el.querySelector(sel.contact)?.textContent?.trim() || ''
-      const snippet = el.querySelector(sel.snippet)?.textContent?.trim() || ''
-      const timestamp = el.querySelector(sel.timestamp)?.textContent?.trim() || ''
-      return { contact, snippet, timestamp, isUnread }
-    })
-  }, {
-    clickable: SELECTORS.CONVERSATION_CLICKABLE,
-    readClass: SELECTORS.CONVERSATION_READ_CLASS,
-    contact: SELECTORS.CONVERSATION_CONTACT,
-    snippet: SELECTORS.CONVERSATION_SNIPPET,
-    timestamp: SELECTORS.CONVERSATION_TIMESTAMP,
-  })
-
-  // Filter and limit
-  const filtered = rawItems
-    .map((item, index) => ({ ...item, index }))
-    .filter(item => options.filter === 'all' || item.isUnread)
-    .slice(0, options.limit)
-
-  // Second pass: extract conversation IDs by intercepting history.pushState
-  // on click, then restoring state — avoids navigating into the conversation
-  // which would mark it as read.
-  const conversations: SmsConversation[] = []
-  for (const item of filtered) {
-    const conversationId = await page.evaluate((params) => {
-      return new Promise<string>((resolve) => {
-        const origPush = history.pushState.bind(history)
-        const origReplace = history.replaceState.bind(history)
-
-        history.pushState = function() {
-          history.pushState = origPush
-          history.replaceState = origReplace
-          const url = arguments[2] as string | undefined
-          const match = url?.match(/itemId=([^&]+)/)
-          resolve(match ? decodeURIComponent(match[1]) : '')
-        }
-        history.replaceState = function() {
-          history.pushState = origPush
-          history.replaceState = origReplace
-          const url = arguments[2] as string | undefined
-          const match = url?.match(/itemId=([^&]+)/)
-          resolve(match ? decodeURIComponent(match[1]) : '')
-        }
-
-        const items = document.querySelectorAll(params.item)
-        const el = items[params.index]
-        const clickTarget = el?.querySelector(params.clickable) as HTMLElement
-        if (clickTarget) {
-          clickTarget.click()
-        }
-
-        // Fallback timeout
-        setTimeout(function() {
-          history.pushState = origPush
-          history.replaceState = origReplace
-          resolve('')
-        }, 3000)
-      })
-    }, { index: item.index, item: SELECTORS.CONVERSATION_ITEM, clickable: SELECTORS.CONVERSATION_CLICKABLE })
-
-    // After intercepting pushState, Angular may have partially updated the view.
-    // Navigate back to the messages list to reset state for the next item.
-    if (conversationId) {
-      await page.goto(VOICE_MESSAGES_URL, { waitUntil: 'load', timeout: 15000 })
-      await page.waitForSelector(SELECTORS.CONVERSATION_ITEM, { timeout: 10000 })
-    }
-
-    conversations.push({
-      conversationId,
-      contact: item.contact,
-      lastMessage: item.snippet,
-      lastTimestamp: item.timestamp,
-      isUnread: item.isUnread,
-    })
-  }
-
-  return conversations
+export interface SendSmsResult {
+  status: 'sent' | 'uncertain'
+  conversationId?: string
+  detail: string
 }
 
-export async function readConversation(
-  page: Page,
-  conversationId: string,
-  limit: number,
-  filter: 'all' | 'unread' = 'all',
-): Promise<SmsMessage[]> {
-  if (filter === 'unread') {
-    const unreadConversations = await listSms(page, { filter: 'unread', limit: 50 })
-    const isUnread = unreadConversations.some(c => c.conversationId === conversationId)
-    if (!isUnread) return []
-  }
-
-  await navigateToConversation(page, conversationId)
-
-  await page.waitForSelector(SELECTORS.MESSAGE_BUBBLE, { timeout: 10000 })
-
+async function countOutgoingMessages(page: Page, expectedText: string): Promise<number> {
   const bubbles = await page.$$(SELECTORS.MESSAGE_BUBBLE)
-  const messages: SmsMessage[] = []
-
-  const start = Math.max(0, bubbles.length - limit)
-  for (let i = start; i < bubbles.length; i++) {
-    const bubble = bubbles[i]
-
-    const text = await bubble
-      .$(SELECTORS.MESSAGE_TEXT)
-      .then(el => el?.innerText() ?? '')
-      .catch(() => '')
-
-    const timestamp = await bubble
-      .$(SELECTORS.MESSAGE_TIMESTAMP)
-      .then(el => el?.innerText() ?? '')
-      .catch(() => '')
-
-    const isInbound = await bubble
-      .$(SELECTORS.MESSAGE_INCOMING)
-      .then(el => el !== null)
-      .catch(() => false)
-
-    const sender = isInbound ? 'contact' : 'me'
-
-    messages.push({
-      conversationId,
-      sender,
-      text: text.trim(),
-      timestamp: timestamp.trim(),
-      isUnread: false,
-      isInbound,
-    })
+  let count = 0
+  for (const bubble of bubbles) {
+    if (await bubble.$(SELECTORS.MESSAGE_INCOMING)) continue
+    const text = await bubble.$(SELECTORS.MESSAGE_TEXT).then(el => el?.innerText() ?? '').catch(() => '')
+    if (isExactOutgoingMessage(expectedText, text, false)) count++
   }
-
-  return messages
+  return count
 }
 
-export async function sendSms(
-  page: Page,
-  phoneNumber: string | string[],
-  text: string,
-): Promise<string> {
-  await navigateToMessages(page)
+/** Send once to the configured destination. A post-click failure is reported as uncertain, never retried. */
+export async function sendSms(page: Page, phoneNumber: string, text: string): Promise<SendSmsResult> {
+  if (!isE164PhoneNumber(phoneNumber)) {
+    throw new Error('Configured self destination must be an E.164 phone number.')
+  }
+  if (!text.trim()) throw new Error('Message text must not be empty.')
 
+  await navigateToMessages(page)
   await page.click(SELECTORS.NEW_CONVERSATION_BUTTON, { timeout: 5000 })
 
-  const numbers = Array.isArray(phoneNumber) ? phoneNumber : [phoneNumber]
-
-  for (let i = 0; i < numbers.length; i++) {
-    const num = numbers[i]
-
-    // Wait for the appropriate input field
-    if (i === 0) {
-      const recipientInput = await page.waitForSelector(SELECTORS.RECIPIENT_INPUT, { timeout: 5000 })
-      await recipientInput.fill(num)
-    } else {
-      const addRecipientsInput = await page.waitForSelector('input[placeholder="Add recipients"]', { timeout: 5000 })
-      await addRecipientsInput.fill(num)
-    }
-
-    await page.waitForTimeout(2000)
-
-    // Click the "Send to <number>" popup that appears below the input
-    const popup = await page.waitForSelector('.send-to-label', { timeout: 5000 })
-    if (popup) {
-      await popup.click()
-    }
-
-    await page.waitForTimeout(1000)
+  const recipientInput = await page.waitForSelector(SELECTORS.RECIPIENT_INPUT, { timeout: 5000 })
+  await recipientInput.fill(phoneNumber)
+  const popup = await page.waitForSelector(SELECTORS.RECIPIENT_SUGGESTION, { timeout: 5000 })
+  if (!hasExactRecipientEvidence(await popup.innerText(), phoneNumber)) {
+    throw new Error('Google Voice recipient suggestion did not match the configured destination; nothing was sent.')
   }
+  await popup.click()
 
-  // Dismiss any overlay and focus the compose area
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(300)
+  assertOwnedVoicePage(page)
+  if (!hasExactRecipientEvidence(await page.locator('body').innerText(), phoneNumber)) {
+    throw new Error('Could not verify the selected recipient is exactly the configured destination; nothing was sent.')
+  }
 
   const composeInput = page.locator(SELECTORS.COMPOSE_INPUT).first()
   await composeInput.click()
-  await page.waitForTimeout(200)
-  await composeInput.pressSequentially(text)
-  await page.waitForTimeout(500)
-
-  const sendBtn = page.locator(SELECTORS.SEND_BUTTON).first()
-  await sendBtn.click({ force: true })
-
-  await page.waitForTimeout(2000)
-
-  // Extract conversation ID from URL
-  const url = page.url()
-  const match = url.match(/itemId=([^&]+)/)
-  const conversationId = match ? decodeURIComponent(match[1]) : ''
-
-  return conversationId
-}
-
-export async function replySms(
-  page: Page,
-  conversationId: string,
-  text: string,
-): Promise<void> {
-  await navigateToConversation(page, conversationId)
-
-  const composeInput = await page.waitForSelector(SELECTORS.COMPOSE_INPUT, { timeout: 5000 })
   await composeInput.fill(text)
+  if ((await composeInput.inputValue()) !== text) {
+    throw new Error('Could not verify the message draft; nothing was sent.')
+  }
 
-  await page.click(SELECTORS.SEND_BUTTON, { timeout: 5000 })
+  const sendButton = page.locator(SELECTORS.SEND_BUTTON).first()
+  if (!(await sendButton.isEnabled())) throw new Error('Google Voice send button is disabled; nothing was sent.')
+  const previousMatchingOutgoingCount = await countOutgoingMessages(page, text)
 
-  await page.waitForTimeout(2000)
-}
-
-export async function markAsRead(
-  page: Page,
-  conversationId: string,
-): Promise<void> {
-  await navigateToConversation(page, conversationId)
-  await page.waitForTimeout(1000)
-
+  // Once click is attempted, any failure is uncertain. Never retry automatically.
   try {
-    const moreBtn = await page.$(SELECTORS.MORE_OPTIONS_BUTTON)
-    if (moreBtn) {
-      await moreBtn.click()
-      await page.waitForTimeout(500)
-      const markReadBtn = await page.$(SELECTORS.MARK_READ_OPTION)
-      if (markReadBtn) {
-        await markReadBtn.click()
-      } else {
-        await page.keyboard.press('Escape')
+    await sendButton.click()
+    await page.waitForFunction(
+      ({ bubbleSelector, textSelector, expectedText, previousCount }) => {
+        const currentCount = Array.from(document.querySelectorAll(bubbleSelector)).filter(bubble => {
+          if (bubble.querySelector('.incoming')) return false
+          return bubble.querySelector(textSelector)?.textContent?.trim() === expectedText.trim()
+        }).length
+        return currentCount > previousCount
+      },
+      {
+        bubbleSelector: SELECTORS.MESSAGE_BUBBLE,
+        textSelector: SELECTORS.MESSAGE_TEXT,
+        expectedText: text,
+        previousCount: previousMatchingOutgoingCount,
+      },
+      { timeout: 10000 },
+    )
+
+    assertOwnedVoicePage(page)
+    const conversationId = verifiedConversationId(page.url())
+    const recipientStillMatches = hasExactRecipientEvidence(await page.locator('body').innerText(), phoneNumber)
+    const newMessageAppeared = isNewOutgoingMessageCount(
+      previousMatchingOutgoingCount,
+      await countOutgoingMessages(page, text),
+    )
+    if (!conversationId || !recipientStillMatches || !newMessageAppeared) {
+      return {
+        status: 'uncertain',
+        detail: 'The send action was initiated, but the intended thread and outgoing message could not both be verified. Do not retry automatically.',
       }
     }
-  } catch {
-    // Opening the conversation already marked it as read
+    return { status: 'sent', conversationId, detail: 'The outgoing message and destination thread were verified.' }
+  } catch (error) {
+    return {
+      status: 'uncertain',
+      detail: `The send action may have reached Google Voice, but verification failed (${error instanceof Error ? error.message : String(error)}). Do not retry automatically.`,
+    }
   }
 }

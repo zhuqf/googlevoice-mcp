@@ -1,53 +1,23 @@
 ---
 name: googlevoice
-description: Set up and use Google Voice SMS via the googlevoice MCP server. Use when the user asks to configure Google Voice, log in, check connection/status, list/read SMS conversations, send/reply to SMS, or mark Google Voice messages read.
+description: Set up Google Voice self-send using the local Google Voice MCP server, check sign-in status, or send an explicitly approved SMS to the configured fixed destination.
 metadata: { "openclaw": { "emoji": "📞" } }
 ---
 
-# Google Voice MCP
+# Google Voice self-send
 
-Google Voice has no public API. This plugin uses a system Chrome/Chromium browser controlled by Playwright through the `googlevoice` MCP server.
+This server exposes only `gv_login`, `gv_check_login`, and `gv_send_to_self`. It cannot read inbox messages, reply to conversations, mark messages read, accept a recipient from the model, or send to a group.
 
-## Tools
+## Setup and sign-in
 
-Use the MCP tools exposed by the `googlevoice` server:
+1. Install dependencies from the checkout with `npm ci` and build it with `npm run build`.
+2. Configure the MCP client to launch the checkout's `dist/server.js`, not an `npx` package.
+3. Configure `GOOGLEVOICE_SELF_NUMBER` in the server environment with the user's own E.164 number.
+4. Call `gv_login`; the user signs into Google Voice in the local Chrome window. No remote debugging port or SSH tunnel is used.
+5. Call `gv_check_login` after sign-in.
 
-- `gv_login` — launch system Chrome with remote debugging for interactive Google login/2FA.
-- `gv_check_login` — verify whether Google Voice is connected.
-- `gv_list_sms` — list recent SMS conversations (`filter`: `all` or `unread`, `limit`).
-- `gv_read_sms` — read a conversation by `conversation_id`.
-- `gv_send_sms` — send a new SMS to one or more phone numbers.
-- `gv_reply_sms` — reply to an existing conversation.
-- `gv_mark_read` — mark a conversation read.
+## Sending
 
-Depending on the harness, tool names may be exposed as `googlevoice__gv_*` or `mcp__googlevoice__gv_*`.
+Only call `gv_send_to_self` when the user has asked to send the exact message. It accepts a message body only; the fixed destination comes from server configuration. The server must show a separate MCP elicitation prompt with the destination and exact message, and the user must explicitly approve it. If the client cannot show that prompt, sending is disabled.
 
-## Setup/status flow
-
-When the user asks to configure, log in, or check status:
-
-1. Call `gv_check_login` first unless the user explicitly asked to start login.
-2. If logged in, tell the user Google Voice is connected and the SMS tools are ready.
-3. If not logged in, call `gv_login`.
-4. Tell the user to complete login from their local machine:
-   - Set up an SSH tunnel using the port returned by the tool, usually `ssh -L 9222:localhost:9222 <server>`.
-   - Open Chrome to `chrome://inspect/#devices`.
-   - Click **Configure...** and add `localhost:9222`.
-   - Click **inspect** on the Google Voice target.
-   - Complete Google login and 2FA until the Google Voice Messages page is visible.
-5. When the user says they are done, call `gv_check_login` again and report the result.
-
-## SMS safety
-
-Sending or replying to SMS is external communication. Draft or confirm with the user before sending unless they explicitly provided the recipient/conversation and exact message text in the current request.
-
-For listing/reading messages, keep results concise and do not expose more private message content than needed for the user's request.
-
-## Local state
-
-Default state directory: `~/.local/share/openclaw/googlevoice`.
-
-Optional MCP server env vars:
-
-- `GOOGLEVOICE_STATE_DIR` — override the browser profile/state directory.
-- `GOOGLEVOICE_DEBUG_PORT` — override Chrome remote debugging port, default `9222`.
+Never retry an uncertain result. The server verifies the selected destination before sending and checks the outgoing message in the resulting thread afterward. If verification is uncertain, tell the user no retry was attempted and ask them to check Google Voice manually before deciding what to do.

@@ -1,8 +1,8 @@
 {
   "id": "googlevoice",
   "name": "Google Voice SMS",
-  "version": "0.0.1",
-  "description": "Google Voice SMS MCP tools and setup skill for OpenClaw.",
+  "version": "0.1.0",
+  "description": "Fixed-destination, user-approved Google Voice self-send MCP tool for OpenClaw.",
   "skills": ["skills"],
   "configSchema": {
     "type": "object",

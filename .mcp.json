@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "googlevoice": {
-      "command": "npx",
-      "args": ["-y", "mcp-googlevoice"]
+      "command": "node",
+      "args": ["/Users/davidj.mcnulla/Projects/googlevoice-mcp/dist/server.js"],
+      "env": {
+        "GOOGLEVOICE_SELF_NUMBER": "REPLACE_WITH_YOUR_E164_NUMBER"
+      }
     }
   }
 }
