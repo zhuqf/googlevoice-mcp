@@ -67,7 +67,7 @@ For VS Code, use the `servers` root object and include `"type": "stdio"` as show
 - Browser operations are serialized. The browser and its child processes are closed on server shutdown; cookies remain in the on-disk browser profile.
 - The destination is configured outside model-controlled tool arguments and must be E.164.
 - The server confirms the selected destination and draft before clicking Send, then verifies the outgoing message and thread. It never automatically retries.
-- Tests use offline fixtures and do not sign in or send a real message.
+- Tests use offline fixtures and a mocked Playwright page; they do not sign in or send a real message.
 
 ## Development and tests
 

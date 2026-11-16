@@ -15,6 +15,13 @@ export interface SendSmsResult {
   detail: string
 }
 
+export interface SendSmsDependencies {
+  navigateToMessages: (page: Page) => Promise<void>
+  assertOwnedVoicePage: (page: Page) => void
+}
+
+const defaultSendSmsDependencies: SendSmsDependencies = { navigateToMessages, assertOwnedVoicePage }
+
 async function countOutgoingMessages(page: Page, expectedText: string): Promise<number> {
   const bubbles = await page.$$(SELECTORS.MESSAGE_BUBBLE)
   let count = 0
@@ -27,13 +34,18 @@ async function countOutgoingMessages(page: Page, expectedText: string): Promise<
 }
 
 /** Send once to the configured destination. A post-click failure is reported as uncertain, never retried. */
-export async function sendSms(page: Page, phoneNumber: string, text: string): Promise<SendSmsResult> {
+export async function sendSms(
+  page: Page,
+  phoneNumber: string,
+  text: string,
+  dependencies: SendSmsDependencies = defaultSendSmsDependencies,
+): Promise<SendSmsResult> {
   if (!isE164PhoneNumber(phoneNumber)) {
     throw new Error('Configured self destination must be an E.164 phone number.')
   }
   if (!text.trim()) throw new Error('Message text must not be empty.')
 
-  await navigateToMessages(page)
+  await dependencies.navigateToMessages(page)
   await page.click(SELECTORS.NEW_CONVERSATION_BUTTON, { timeout: 5000 })
 
   const recipientInput = await page.waitForSelector(SELECTORS.RECIPIENT_INPUT, { timeout: 5000 })
@@ -44,7 +56,7 @@ export async function sendSms(page: Page, phoneNumber: string, text: string): Pr
   }
   await popup.click()
 
-  assertOwnedVoicePage(page)
+  dependencies.assertOwnedVoicePage(page)
   if (!hasExactRecipientEvidence(await page.locator('body').innerText(), phoneNumber)) {
     throw new Error('Could not verify the selected recipient is exactly the configured destination; nothing was sent.')
   }
@@ -80,7 +92,7 @@ export async function sendSms(page: Page, phoneNumber: string, text: string): Pr
       { timeout: 10000 },
     )
 
-    assertOwnedVoicePage(page)
+    dependencies.assertOwnedVoicePage(page)
     const conversationId = verifiedConversationId(page.url())
     const recipientStillMatches = hasExactRecipientEvidence(await page.locator('body').innerText(), phoneNumber)
     const newMessageAppeared = isNewOutgoingMessageCount(

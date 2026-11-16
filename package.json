@@ -17,7 +17,7 @@
     "dev": "tsx server.ts",
     "test": "tsx --test tests/*.test.ts",
     "prepublishOnly": "npm run build",
-    "pack:openclaw": "tar -czf googlevoice-openclaw-plugin.tgz openclaw.plugin.json skills .mcp.json README.md package.json package-lock.json server.ts browser.ts actions.ts safety.ts selectors.ts types.ts tsconfig.json"
+    "pack:openclaw": "tar -czf googlevoice-openclaw-plugin.tgz openclaw.plugin.json skills .mcp.json README.md package.json package-lock.json server.ts server-policy.ts browser.ts actions.ts safety.ts selectors.ts types.ts tsconfig.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

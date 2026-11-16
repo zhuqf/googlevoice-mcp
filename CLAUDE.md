@@ -18,10 +18,11 @@ MCP client configs must launch this checkout's `dist/server.js`, never an unpinn
 ## Architecture
 
 - `server.ts` exposes only `gv_login`, `gv_check_login`, and `gv_send_to_self`; inbox reading, replies, mark-read, caller-supplied recipient numbers, and group sends are disabled.
-- Every MCP tool operation is serialized. Sending requires client elicitation support and an explicit accept response; unsupported/canceled prompts fail closed.
+- `server-policy.ts` contains the tool list, serialization queue, and explicit elicitation approval policy; unsupported/canceled prompts fail closed and are tested without a client/browser.
+- Every MCP tool operation is serialized.
 - `browser.ts` launches system Chrome as a Playwright persistent context over its private control pipe. It does not attach to an existing browser or expose CDP/debugging ports. Page use requires the owned page and exact `https://voice.google.com` origin. Shutdown closes the owned context/process tree.
 - `actions.ts` verifies the selected destination and draft before sending, then verifies a newly appearing exact outgoing message in a Google Voice conversation. A post-click failure is uncertain and is never retried automatically.
-- `safety.ts` contains pure recipient/thread/message checks exercised by `tests/safety.test.ts` without a browser or real account.
+- `safety.ts` contains pure recipient/thread/message checks. `tests/` covers these plus approval, serialization, and the send workflow using a mocked Playwright page; no real browser/account is used.
 - `selectors.ts` isolates Google Voice DOM selectors. Changes to live behavior require careful, manual review; do not use a real account for tests.
 
 ## Safety constraints

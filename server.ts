@@ -7,19 +7,14 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { ensureBrowser, launchLoginBrowser, shutdownBrowser, checkLoginStatus } from './browser.js'
 import { sendSms } from './actions.js'
+import { createSerialExecutor, requestSendApproval, SELF_SEND_TOOLS } from './server-policy.js'
 
 const server = new Server(
   { name: 'googlevoice-self-send', version: '0.1.0' },
   { capabilities: { tools: {} } },
 )
 
-let operationQueue: Promise<void> = Promise.resolve()
-
-function serialize<T>(operation: () => Promise<T>): Promise<T> {
-  const result = operationQueue.then(operation, operation)
-  operationQueue = result.then(() => undefined, () => undefined)
-  return result
-}
+const serialize = createSerialExecutor()
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true }
@@ -37,51 +32,7 @@ function configuredDestination(): string {
   return number
 }
 
-async function requestSendApproval(destination: string, text: string): Promise<boolean> {
-  if (!server.getClientCapabilities()?.elicitation?.form) return false
-  const approval = await server.elicitInput({
-    mode: 'form',
-    message: `Approve sending this exact SMS to your configured number ${destination}?\n\n${text}`,
-    requestedSchema: {
-      type: 'object',
-      properties: {
-        approved: {
-          type: 'boolean',
-          title: 'Approve this send',
-          description: 'Only approve if the destination and exact message above are correct.',
-        },
-      },
-      required: ['approved'],
-    },
-  })
-  return approval.action === 'accept' && approval.content?.approved === true
-}
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
-    {
-      name: 'gv_login',
-      description: 'Open the locally owned system Chrome window so you can sign in to Google Voice. No remote debugging listener is opened.',
-      inputSchema: { type: 'object' as const, properties: {} },
-    },
-    {
-      name: 'gv_check_login',
-      description: 'Check whether Google Voice is signed in on this server-owned browser.',
-      inputSchema: { type: 'object' as const, properties: {} },
-    },
-    {
-      name: 'gv_send_to_self',
-      description: 'Send one SMS to the fixed destination configured in GOOGLEVOICE_SELF_NUMBER. The server asks for explicit user approval of the destination and exact message before sending.',
-      inputSchema: {
-        type: 'object' as const,
-        properties: {
-          text: { type: 'string', minLength: 1, description: 'Exact SMS text to send to the configured self destination.' },
-        },
-        required: ['text'],
-      },
-    },
-  ],
-}))
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: SELF_SEND_TOOLS }))
 
 server.setRequestHandler(CallToolRequestSchema, async req => serialize(async () => {
   const args = (req.params.arguments ?? {}) as Record<string, unknown>
@@ -105,7 +56,12 @@ server.setRequestHandler(CallToolRequestSchema, async req => serialize(async () 
         if (!server.getClientCapabilities()?.elicitation?.form) {
           return errorResult('Sending is disabled because this MCP client cannot display the required user approval prompt.')
         }
-        const approved = await requestSendApproval(destination, text)
+        const approved = await requestSendApproval(
+          Boolean(server.getClientCapabilities()?.elicitation?.form),
+          params => server.elicitInput(params),
+          destination,
+          text,
+        )
         if (!approved) return errorResult('Send cancelled or not explicitly approved; no message was sent.')
 
         if (!(await checkLoginStatus())) return errorResult('Not logged in to Google Voice. No message was sent.')
